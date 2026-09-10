@@ -145,13 +145,25 @@ dsh-auth-<sha256(authority)>=…; HttpOnly; SameSite=Strict
 
 ## 安装
 
-### 从 GitHub(推荐)
+### 从 npm(推荐)
+
+```bash
+dsh plugin --profile web add dsh-remote-dsh
+```
+
+`dsh plugin` 会把包装进 profile 并自动加上插件层(本包在 `package.json` 里声明了 `dsh.bundle.patch`),无需手改配置。**然后重启一次 DSH** —— bundle 层是启动时组合的,`patchReload: live` 管不到它。
+
+后续升级同理:
+
+```bash
+dsh plugin --profile web update dsh-remote-dsh   # 再重启一次
+```
+
+### 从 GitHub(等价,想跟 main 分支时用)
 
 ```bash
 dsh plugin --profile web add github:hutao562/dsh-remote-dsh
 ```
-
-`dsh plugin` 会把包装进 profile 并自动加上插件层(本包在 `package.json` 里声明了 `dsh.bundle.patch`),无需手改配置。**然后重启一次 DSH**。
 
 ### 从源码(开发用,不需要重启)
 
