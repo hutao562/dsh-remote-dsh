@@ -1,0 +1,12 @@
+# dsh-remote-dsh bundle patch.
+#
+# Inserted into the profile roster by `dsh plugin --profile web add` (the
+# `dsh.bundle.patch` declaration in package.json makes this package a bundle
+# layer). The Node half (exports ".") owns the remote-host registry and the
+# /api/remote-dsh route family; the `dsh.client` declaration in package.json
+# makes the browser half (exports "./client", served at
+# /plugins/dsh-remote-dsh/client.js) load in the Web GUI.
+
+- insert:
+    - id: remote-dsh
+      name: 'dsh-remote-dsh'

@@ -1,0 +1,56 @@
+{
+  "name": "dsh-remote-dsh",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin: a sidebar tab that takes over the whole page with another DSH instance's Web GUI, plus a remote session-state badge on the rail row. 在侧边栏顶部加一个「远程」标签，整页切到另一台主机上的 DSH。",
+  "type": "module",
+  "license": "MIT",
+  "author": "hutao562",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hutao562/dsh-remote-dsh.git"
+  },
+  "homepage": "https://github.com/hutao562/dsh-remote-dsh#readme",
+  "bugs": {
+    "url": "https://github.com/hutao562/dsh-remote-dsh/issues"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node .verify/client-smoke.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "cordis",
+    "remote",
+    "sidebar",
+    "multi-host"
+  ]
+}

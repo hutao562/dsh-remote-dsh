@@ -1,0 +1,19 @@
+# Dependencies (only the smoke test needs any)
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+.npmcache/
+
+# This package is hand-authored: `lib/` IS the source, so nothing is ignored
+# there. Keep stray build output and local scratch out of the repo.
+dist/
+*.tgz
+
+# Local verification scratch
+.verify/*.local.*
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
