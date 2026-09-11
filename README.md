@@ -11,6 +11,14 @@ A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin. It adds a **�
 └────────────┴──────────────────────────────────┘
 ```
 
+实际长这样。侧边栏顶部那一行 —— 蓝色胶囊就是远端的状态点(这里远端正跑着东西,数字是会话数):
+
+![本机侧边栏的「远程」行](docs/images/sidebar-row.png)
+
+点开之后,整个页面都变成远端那台机器的 DSH:顶栏是插件的(返回 / 主机 / 添加 / 设置 / 连通状态),下面是它的 GUI,连侧边栏都是它的:
+
+![整页切到远端的 DSH](docs/images/remote-takeover.png)
+
 ## 装
 
 ```bash
