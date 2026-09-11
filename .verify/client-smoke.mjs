@@ -154,7 +154,8 @@ const ctx = {
 }
 exported.apply(ctx)
 
-check('apply installs exactly one scoped stylesheet', injectedStyles.length === 1, String(injectedStyles.length))
+check('apply installs exactly two stylesheets (the sidebar seam, the dot chase)',
+  injectedStyles.length === 2, String(injectedStyles.length))
 const sidebarCss = injectedStyles[0]?.textContent ?? ''
 check('stylesheet raises the panel list above New Session',
   sidebarCss.includes('[class*="panelList"]{order:-1}'), sidebarCss)
@@ -164,7 +165,20 @@ check('stylesheet is scoped to the sidebar anchor only',
   sidebarCss.split('}').filter(rule => rule !== '').every(rule => rule.startsWith('[data-slot="sidebar"]')), sidebarCss)
 check('style tag is tagged for DOM inspection',
   injectedStyles[0]?.attributes['data-dsh-remote-dsh'] === 'sidebar-order')
-check('the effect is labelled', effects.some(entry => String(entry.label).includes('sidebar order')))
+check('the effect is labelled', effects.some(entry => String(entry.label).includes('styles')))
+
+// The running dot animates through a keyframe, and React inline styles cannot
+// carry one, so the rule has to ship in its own document-wide stylesheet.
+const dotCss = injectedStyles[1]?.textContent ?? ''
+check('the dot stylesheet is tagged separately from the sidebar rule',
+  injectedStyles[1]?.attributes['data-dsh-remote-dsh'] === 'status-dot')
+check('the dot stylesheet carries the chase keyframes',
+  dotCss.includes('@keyframes dsh-remote-dsh-chase'), dotCss)
+check('the chase holds four discrete brightness steps, as the sidebar does',
+  dotCss.includes('0%,12.4%{opacity:1}') && dotCss.includes('12.5%,24.9%{opacity:.6}')
+  && dotCss.includes('25%,37.4%{opacity:.35}') && dotCss.includes('37.5%,100%{opacity:.15}'), dotCss)
+check('the animated class is namespaced, not a bare generic name',
+  dotCss.includes('.dsh-remote-dsh-cell{'), dotCss)
 
 check('injects sidebar.panellist', injected.has('sidebar.panellist'))
 check('injects main (required for the rail pair check)', injected.has('main'))
@@ -209,13 +223,30 @@ check('the green count is labelled as activity, not as idle sessions',
   wide.includes('上次查看后有活动'), wide)
 
 const compact = render(exported.statusBadge({ running: 1, unread: 2, unreachable: 0 }, true))
-check('rail badge is a single dot with no counts',
-  !compact.includes('>1<') && !compact.includes('>2<') && compact.includes('border-radius:50%'), compact)
+check('rail badge drops the counts',
+  !compact.includes('>1<') && !compact.includes('>2<'), compact)
 check('rail badge takes the running color when anything is running',
   compact.includes('--dsw-static-deepseek-450'), compact)
+// "Running" is the one state that animates, and it must be the sidebar's own
+// eight-cell chase rather than a second, lookalike spinner.
+check('rail badge animates the running state with the sidebar chase',
+  compact.startsWith('<svg') && compact.includes('shape-rendering="crispEdges"'), compact.slice(0, 120))
+check('the chase draws the eight outer cells clockwise from the top-left',
+  (compact.match(/<rect /gu) ?? []).length === 8
+  && compact.includes('x="0" y="0"') && compact.includes('x="8" y="8"'), compact.slice(0, 200))
+check('every cell is phased a step apart so the chase runs from mount',
+  compact.includes('animation-delay:-1000ms') && compact.includes('animation-delay:-125ms'), compact.slice(-260))
+check('every cell carries the namespaced animation class',
+  (compact.match(/class="dsh-remote-dsh-cell"/gu) ?? []).length === 8)
 const compactUnread = render(exported.statusBadge({ running: 0, unread: 3, unreachable: 0 }, true))
 check('rail badge falls back to the done color when there is unread activity',
   compactUnread.includes('--dsw-alias-state-success-primary'), compactUnread)
+// Only "running" animates: a still dot is a halo plus a 6/10-scale core.
+check('a non-running state is a still halo-plus-core dot, not the chase',
+  compactUnread.includes('border-radius:50%') && !compactUnread.includes('<svg'), compactUnread)
+check('the still dot is layered the way the sidebar draws it',
+  (compactUnread.match(/border-radius:50%/gu) ?? []).length === 2
+  && compactUnread.includes('opacity:0.1'), compactUnread)
 
 // The unread verdict must be a DURATION comparison only. This deployment's peer
 // clock runs ~3 s ahead, which an absolute-timestamp comparison would turn into
@@ -259,6 +290,17 @@ check('waiting is rendered before running in the wide badge',
 const waitingCompact = render(exported.statusBadge({ waiting: 1, running: 2, unread: 3, unreachable: 0 }, true))
 check('rail badge takes the amber color when a session is waiting for you',
   waitingCompact.includes('--dsw-alias-state-warn-primary'), waitingCompact)
+check('...as a still dot: waiting is an alarm, not an ongoing chase',
+  !waitingCompact.includes('<svg') && waitingCompact.includes('border-radius:50%'), waitingCompact)
+// The wide row pairs each state with its count, so the running one has to keep
+// the chase there too.
+check('wide badge animates its running dot as well',
+  (wide.match(/<svg [^>]*crispEdges/gu) ?? []).length === 1, wide)
+check('wide badge animates only its running dot, never the still states',
+  (waitingWide.match(/<svg [^>]*crispEdges/gu) ?? []).length === 1, waitingWide.slice(0, 120))
+check('...and the amber waiting dot stays a still halo-plus-core dot',
+  waitingWide.includes('--dsw-alias-state-warn-primary')
+  && (waitingWide.match(/border-radius:50%/gu) ?? []).length === 4, waitingWide)
 const amberOverRed = render(exported.statusBadge({ waiting: 1, running: 0, unread: 0, unreachable: 4 }, true))
 check('rail badge prefers amber over the unreachable color',
   amberOverRed.includes('--dsw-alias-state-warn-primary') && !amberOverRed.includes('--dsw-alias-state-error-primary'),
