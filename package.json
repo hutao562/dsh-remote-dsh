@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-dsh",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DeepSeek Harness plugin: a sidebar tab that takes over the whole page with another DSH instance's Web GUI, plus a remote session-state badge on the rail row. 在侧边栏顶部加一个「远程」标签，整页切到另一台主机上的 DSH。",
   "type": "module",
   "license": "MIT",
