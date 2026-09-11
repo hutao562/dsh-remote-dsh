@@ -32,16 +32,28 @@ const check = (label, condition, detail) => {
   }
 }
 
-/** A context exposing only the listener registry `observePendingInteractions` uses. */
+/**
+ * A context exposing only the listener registry `observePendingInteractions` uses.
+ *
+ * `on` honours cordis' `prepend` option (unshift, not push) because listener
+ * ORDER is part of the contract here, not an implementation detail: a waterfall
+ * runs outermost-first and a listener that does not call `next()` vetoes the
+ * rest of the chain. It also records the options each registration passed, so a
+ * test can assert the position the observer asked for.
+ */
 function fakeCtx() {
   const listeners = new Map()
+  const registrations = []
   return {
     listeners,
-    on(name, listener) {
+    registrations,
+    on(name, listener, options) {
       if (!listeners.has(name)) listeners.set(name, [])
-      listeners.get(name).push(listener)
+      registrations.push({ name, options })
+      const list = listeners.get(name)
+      if (options?.prepend === true) list.unshift(listener)
+      else list.push(listener)
       return () => {
-        const list = listeners.get(name)
         const at = list.indexOf(listener)
         if (at !== -1) list.splice(at, 1)
         if (list.length === 0) listeners.delete(name)
@@ -170,6 +182,38 @@ await planOutcome
 dispose()
 check('disposing removes both listeners',
   !ctx.listeners.has('approval/request') && !ctx.listeners.has('user-questions/request'))
+
+// ── 2b. Where in the chain the observer has to sit ──────────────────────────
+//
+// The reported defect: a remote session sat amber on its own sidebar while the
+// badge here stayed blue. The request WAS reaching the remote's browser, so the
+// waterfall was dispatched — but the observer never ran. The Remote Events
+// bridge registers eagerly at boot (before any patch-layer plugin) and holds the
+// chain open while the browser waits for the human, and a cordis waterfall
+// listener that does not call `next()` vetoes everything after it. So an
+// observer registered behind the bridge is never called while a request is
+// pending — the only moment it has anything to report.
+console.log('')
+console.log('2b. observer position in the chain')
+const raceCtx = fakeCtx()
+const race = createPeerTracker()
+let forwarded = 0
+// The bridge, exactly as `api-remotes` registers it: forwards to the browser and
+// never calls next() until the human answers.
+raceCtx.on('user-questions/request', () => { forwarded += 1; return new Promise(() => {}) })
+observePendingInteractions(raceCtx, race)
+check('the observer registers ahead of the listeners already in the chain',
+  raceCtx.registrations.filter(entry => entry.options?.prepend === true).length === 2,
+  JSON.stringify(raceCtx.registrations))
+void raceCtx.waterfall(
+  'user-questions/request',
+  { agent: { session: { id: 'blocked' } }, questions: [] },
+  () => Promise.resolve('unavailable'),
+)
+check('a request held open by an earlier answerer is still observed',
+  race.kindOf('blocked') === 'question', String(race.kindOf('blocked')))
+check('...and is still handed down the chain, not swallowed by the observer',
+  forwarded === 1, String(forwarded))
 
 // ── 3. What the peer publishes ──────────────────────────────────────────────
 //

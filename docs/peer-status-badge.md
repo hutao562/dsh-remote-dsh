@@ -115,13 +115,30 @@ this.ctx.waterfall(scopeTarget(req.agent, req.agent), 'approval/request', req, (
 ```js
 ctx.on('approval/request', function (request, next) {
   return holdPending(tracker, requestSessionId(request), 'approval', next)
-})
+}, { prepend: true })
 ctx.on('user-questions/request', function (request, next) {
   return holdPending(tracker, requestSessionId(request), questionKind(request), next)
-})
+}, { prepend: true })
 ```
 
 `holdPending` 是**透明的链节**:记录 → `next()` → 结算时释放。它不回答、不吞异常、不改结果(下游同步抛出的异常照样同步抛出),唯一的副作用是这段时间里这个会话被标成"等你"。请求该到哪个浏览器还是到哪个浏览器。
+
+#### `prepend: true` 不是口味问题,是位置问题(踩过的坑)
+
+**症状**:远端那边的会话是**琥珀**的(它自己的侧边栏这么画),本机这一行却还是**蓝色运行中**。查下来 remote 的 self-status 里根本没有 `pending` 字段 —— 请求确实发出去了(远端浏览器收到了,所以那边有琥珀),但 peer 的监听**从来没被调用过**。
+
+原因是 cordis 的 waterfall 语义:**监听器外层先跑,不调 `next()` 的那个会否决整条链**。而 Remote-event 桥接(`api-remotes`)正是这样一个监听器 —— 它把请求交给浏览器,然后**一直等到人回答**,期间不调 `next()`。它是**在启动时**就注册的(`registerRemoteEvents` 里 `source(lifetime.signal)` 是立即调用的,不是等有连接才注册),也就是说它**排在任何一个 patch 层插件前面**。于是挂在它后面的 peer 监听只会在"浏览器答不上来"时被调用 —— 而请求 pending 的那段时间恰恰不是。
+
+**用真实框架量过**(真 `Context`、真 `scopeTarget` carrier、一个"桥接形状"的、拿着链不放的监听器):
+
+| 注册位置 | self-status 里的那一行 |
+|---|---|
+| 排在桥接**后面**(这次修之前) | `{running:true}` —— 没有 `pending` |
+| 排到桥接**前面**(`prepend: true`) | `{running:true, pending:'question'}` ✅ |
+
+排在前面不花任何代价:`holdPending` 永远 `next()` 下去,所以请求照样到达浏览器,而 tracker 在链结算时释放。这条不变量的守卫在 `.verify/host-pending.mjs` 的 "2b. observer position in the chain"(去掉 `prepend` 两条具名断言就挂)。
+
+> **改的是 Host 半面,被控端要重启 DSH 才生效**(`lib/index.js` 不走热重载),而且**只对重启之后新发出的请求生效** —— tracker 是在请求分发的那一刻记下来的,一个已经挂在那儿的旧请求不会因为重启而"补录"。
 
 三个细节:
 
