@@ -164,7 +164,12 @@ check('stylesheet keeps the brand row first',
 check('stylesheet is scoped to the sidebar anchor only',
   sidebarCss.split('}').filter(rule => rule !== '').every(rule => rule.startsWith('[data-slot="sidebar"]')), sidebarCss)
 check('style tag is tagged for DOM inspection',
-  injectedStyles[0]?.attributes['data-dsh-remote-dsh'] === 'sidebar-order')
+  injectedStyles[0]?.attributes['data-dsh-remote-dsh'] === 'sidebar-seam')
+// The count cluster only reaches the row's trailing edge if the shell's glyph
+// span stops being a box for our row: without this the chip is laid out in front
+// of the label. `:has` on our own marker is what keeps other panels untouched.
+check('the seam dissolves the shell glyph span for this row only',
+  sidebarCss.includes('[class*="panelGlyph"]:has([data-dsh-remote-badge]){display:contents}'), sidebarCss)
 check('the effect is labelled', effects.some(entry => String(entry.label).includes('styles')))
 
 // The running dot animates through a keyframe, and React inline styles cannot
@@ -221,6 +226,18 @@ check('wide badge uses the running token for the blue dot', wide.includes('--dsw
 check('wide badge uses the success token for the green dot', wide.includes('--dsw-alias-state-success-primary'), wide)
 check('the green count is labelled as activity, not as idle sessions',
   wide.includes('上次查看后有活动'), wide)
+// The reported defect: the label read `远程` AFTER the count, because the badge
+// was laid out inside the glyph box, ahead of the shell's label span. The
+// cluster is now a flex item of the row pushed to the trailing edge — the seat
+// the session rows give their time stamp — so the label keeps the shell's own
+// 8px rhythm and every row's text starts on the same column.
+check('the count cluster is pinned to the row trailing edge, not left of the label',
+  wide.includes('margin-left:auto'), wide.slice(0, 200))
+check('each count is a pill in the state color, tinted from that same color',
+  (wide.match(/border-radius:999px/gu) ?? []).length === 2
+  && wide.includes('color-mix(in srgb, var(--dsw-static-deepseek-450, #4d6bfe) 16%, transparent)'), wide)
+check('the count is readable as a number, not a bare dot',
+  wide.includes('font-variant-numeric:tabular-nums'), wide)
 
 const compact = render(exported.statusBadge({ running: 1, unread: 2, unreachable: 0 }, true))
 check('rail badge drops the counts',
@@ -241,11 +258,21 @@ check('every cell carries the namespaced animation class',
 const compactUnread = render(exported.statusBadge({ running: 0, unread: 3, unreachable: 0 }, true))
 check('rail badge falls back to the done color when there is unread activity',
   compactUnread.includes('--dsw-alias-state-success-primary'), compactUnread)
+// The 36px rail cell has no label and no room for one, so the dot must HANG on
+// the glyph's corner instead of sitting beside it: in flow it would push the
+// glyph off the cell's center, which is what the rail looked like before.
+check('the rail dot is hung on the glyph corner, out of flow',
+  compactUnread.includes('position:absolute') && compactUnread.includes('top:-4px')
+  && compactUnread.includes('right:-4px'), compactUnread)
+check('the rail dot carries a ring in the sidebar fill so it reads as a notch',
+  compactUnread.includes('box-shadow:0 0 0 2px var(--dsw-specific-sidebar-fill'), compactUnread)
 // Only "running" animates: a still dot is a halo plus a 6/10-scale core.
 check('a non-running state is a still halo-plus-core dot, not the chase',
   compactUnread.includes('border-radius:50%') && !compactUnread.includes('<svg'), compactUnread)
 check('the still dot is layered the way the sidebar draws it',
-  (compactUnread.match(/border-radius:50%/gu) ?? []).length === 2
+  // Three, not two: the halo and the 6/10 core, plus the outer box, which needs
+  // the radius itself for the rail dot's ring to come out round.
+  (compactUnread.match(/border-radius:50%/gu) ?? []).length === 3
   && compactUnread.includes('opacity:0.1'), compactUnread)
 
 // The unread verdict must be a DURATION comparison only. This deployment's peer
@@ -402,6 +429,20 @@ exported.statusStore.set({
 })
 const badgeHtml = render(React.createElement(rail.component, { size: 16, active: true }))
 check('the rail glyph subscribes to the store', badgeHtml.includes('data-dsh-remote-badge'), badgeHtml.slice(0, 100))
+// The wrapper has to dissolve in the WIDE row or the cluster never leaves the
+// glyph box; it has to stay a box in the RAIL, because the corner dot is
+// positioned against it. Same component, two layouts, opposite requirements.
+check('the wide row dissolves the icon wrapper into the row flex line',
+  badgeHtml.includes('display:contents'), badgeHtml.slice(0, 160))
+const railHtml = render(React.createElement(rail.component, { size: 18, active: true }))
+check('the rail keeps the icon wrapper as the corner dot\'s containing box',
+  railHtml.includes('position:relative') && !railHtml.includes('display:contents'), railHtml.slice(0, 160))
+// The glyph is the shipped `ic_ds_globe_outline_14` path data, inlined. A filled
+// 14-viewBox extract, not the stroked globe that used to sit visibly lighter
+// than the shell's own filled 16px glyphs.
+check('the glyph is the shipped filled globe, not a hand-drawn stroke',
+  badgeHtml.includes('viewBox="0 0 14 14"') && badgeHtml.includes('M7.00018 0.353516')
+  && !badgeHtml.includes('stroke='), badgeHtml.slice(0, 200))
 check('the glyph tooltip breaks the aggregate down per host',
   badgeHtml.includes('mengshan') && badgeHtml.includes('运行中 1'), badgeHtml)
 check('the glyph carries the waiting state into the rail',
