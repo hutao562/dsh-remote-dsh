@@ -244,6 +244,15 @@ check('each count is a pill in the state color, tinted from that same color',
   && wide.includes('color-mix(in srgb, var(--dsw-static-deepseek-450, #4d6bfe) 16%, transparent)'), wide)
 check('the count is readable as a number, not a bare dot',
   wide.includes('font-variant-numeric:tabular-nums'), wide)
+// Type is chosen, not inherited: the count is a QUANTITY, so it rides the UI
+// stack the way the design system's own numeric pills do (`font: inherit` +
+// tabular figures). The code stack is for identifiers and payloads, which in
+// this plugin are the host URL and the token — never the count.
+check('the count chip names the UI stack, not the code stack',
+  wide.includes('--dsw-font-family') && !wide.includes('--ds-font-family-code'), wide.slice(0, 300))
+check('the chip geometry is the shipped capsule spec, not invented numbers',
+  wide.includes('padding:1px 8px') && wide.includes('font-size:11px')
+  && wide.includes('line-height:17px') && wide.includes('font-weight:500'), wide)
 
 const compact = render(exported.statusBadge({ running: 1, unread: 2, unreachable: 0 }, true))
 check('rail badge drops the counts',
@@ -516,6 +525,11 @@ if (activeHtml !== undefined) {
   check('no iframe is created before a host exists', !activeHtml.includes('<iframe'))
   check('empty state shown with no hosts', activeHtml.includes('还没有配置远程 DSH'))
   check('takeover is flagged for DOM inspection', activeHtml.includes('data-dsh-remote-workspace'))
+  // One declaration names the family for everything this plugin draws, so the
+  // chrome cannot drift with wherever it happens to be mounted.
+  check('the takeover names the UI stack once, for the whole bar',
+    activeHtml.includes('--dsw-font-family')
+    && /data-dsh-remote-workspace="[^"]*"[^>]*font-family/u.test(activeHtml), activeHtml.slice(0, 200))
 }
 
 console.log('')
@@ -577,6 +591,16 @@ gear()?.click()
 await tick()
 check('clicking ⚙ opens the settings row', tokenField() !== undefined)
 check('the ⚙ tooltip reads 收起设置', gear()?.getAttribute('title') === '收起设置')
+// Machine strings — the host URL and the token — ride the code stack, so every
+// character of them is distinguishable. `<code>` alone would NOT: the UA sheet
+// pins it to a bare `monospace`, the stack ui-theme's base.css documents as
+// unsafe on a CJK host (Windows falls back to SimSun).
+check('the host URL is set in the code stack, not the UA monospace',
+  String(container.querySelector('code')?.getAttribute('style')).includes('--ds-font-family-code'),
+  String(container.querySelector('code')?.getAttribute('style')))
+check('the token field is set in the code stack too',
+  String(tokenField()?.getAttribute('style')).includes('--ds-font-family-code'),
+  String(tokenField()?.getAttribute('style')))
 
 gear()?.click()
 await tick()

@@ -43,6 +43,22 @@ README 里放不下的取舍、槽位选择、以及踩过的坑。
 
 状态也压到一个点加两个字(`已连通` / `端口不通` / `未探测`),完整说明走 tooltip。注意 `已连通` 只证明**端口通、对面 DSH 活着** —— 这个探测看不到「本浏览器的 cookie 是否还有效」,所以文案不声称已配对。
 
+### 字体是选出来的,不是继承来的
+
+DSH 在 `body` 上设了 `--dsw-font-family`,所以"啥都不写"今天也能看对 —— 但那是**碰巧**:插件画在哪个祖先下面就会跟着谁走。这里把两条栈显式写出来,顺便把分工摆明:
+
+| 用在哪 | 栈 |
+|---|---|
+| 自己的界面(顶栏、设置行、提示、控件) | `--dsw-font-family` —— 整个 overlay 根节点写一次,内部全靠继承 |
+| 机器串:主机地址、token | `--ds-font-family-code` |
+| rail 计数胶囊 | `--dsw-font-family` + `font-variant-numeric: tabular-nums` |
+
+三点理由:
+
+- **地址和 token 走等宽**。它们是要逐字符核对的东西(`0/O`、`1/l`)。注意 `<code>` 元素**本身不够** —— UA 样式表把它钉死在裸 `monospace` 上,而 `ui-theme/src/styles/base.css` 明确写着这条栈要避开(Windows 的 CJK 会落到 SimSun)。所以要显式给。
+- **计数走 UI 栈 + 等宽数字**,不走等宽字体。设计系统自己就是这么处理"数量"的:`StatsPills` / `TurnUsagePanel` 都是 `font: inherit` 配 `tabular-nums`;等宽字体留给标识符和载荷。`tabular-nums` 则保证 `1` 的胶囊和 `8` 的胶囊一样宽,计数变化时最右那一簇不会左右抽动。
+- **`var()` 的兜底写的是官方原文**。token 缺失会让整条 `font-family` 在计算值阶段失效、退回 `unset`,于是文字**静默继承**上一层 —— 正好是这几行要防的那个意外。
+
 ## 切走再切回,不会重新加载
 
 `shell.overlay` 的条目是常驻的。切换面板时组件**不卸载**,只用 `display: none` 隐藏。
