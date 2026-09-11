@@ -19,7 +19,7 @@
  *   npm run test:host
  */
 
-const { createPendingTracker, observePendingInteractions, collectSelfStatus, STATUS_VERSION } =
+const { createPeerTracker, observePendingInteractions, collectSelfStatus, STATUS_VERSION } =
   await import('../lib/index.js')
 
 const failures = []
@@ -73,7 +73,7 @@ const deferred = () => {
 
 // ── 1. The register itself ──────────────────────────────────────────────────
 console.log('1. pending register')
-const tracker = createPendingTracker()
+const tracker = createPeerTracker()
 check('an untouched register reports nothing', tracker.entries().length === 0)
 const releaseApproval = tracker.track('s1', 'approval')
 check('a tracked request is visible', tracker.kindOf('s1') === 'approval')
@@ -100,7 +100,7 @@ check('sessions are reported independently',
 console.log('')
 console.log('2. waterfall observers')
 const ctx = fakeCtx()
-const live = createPendingTracker()
+const live = createPeerTracker()
 const dispose = observePendingInteractions(ctx, live)
 check('both pending waterfalls are observed',
   ctx.listeners.has('approval/request') && ctx.listeners.has('user-questions/request'))
@@ -198,7 +198,7 @@ check('subagent and blank sessions are not rows of their own',
 check('a bare read carries no pending field at all',
   bare.sessions.every(session => !('pending' in session)), JSON.stringify(bare.sessions))
 
-const attributed = createPendingTracker()
+const attributed = createPeerTracker()
 attributed.track('root', 'approval')
 const own = await collectSelfStatus(statusCtx, attributed)
 check('a session waiting for the operator is reported as pending',
@@ -207,22 +207,90 @@ check('a session waiting for the operator is reported as pending',
 check('a session with nothing open carries no pending field',
   !('pending' in own.sessions.find(session => session.ageMs > 50000)), JSON.stringify(own.sessions))
 
-const fromChild = createPendingTracker()
+const fromChild = createPeerTracker()
 fromChild.track('child', 'question')
 const rolled = await collectSelfStatus(statusCtx, fromChild)
 check('a blocked subagent is attributed to the row the reader sees',
   rolled.sessions.find(session => session.running === true)?.pending === 'question',
   JSON.stringify(rolled.sessions))
 
-const orphan = createPendingTracker()
+const orphan = createPeerTracker()
 orphan.track('never-listed', 'approval')
 const unlisted = await collectSelfStatus(statusCtx, orphan)
 check('a request from a session that is not listed changes nothing',
   unlisted.sessions.every(session => !('pending' in session)), JSON.stringify(unlisted.sessions))
 
+// ── 4. Finishes, attributed to the session that produced them ───────────────
+// The reader used to hold this count itself, which let one session masquerade as
+// two: it could not tell a session that was prompted AND finished from two
+// sessions, nor one session finishing twice from two finishing once. Keyed by
+// the real session id here, each finish stays on its own row.
+console.log('')
+console.log('4. finish register')
+
+/** A list context whose rows can be rewritten between reads. */
+const listing = (rows) => ({ get: name => (name === 'sessionController'
+  ? { list: async () => ({ items: rows }) }
+  : undefined) })
+const runningRow = (id) => ({ sessionId: id, blank: false, running: true, updatedAt: Date.now() })
+const idleRow = (id) => ({ sessionId: id, blank: false, running: false, updatedAt: Date.now() })
+
+const fin = createPeerTracker()
+await collectSelfStatus(listing([runningRow('a')]), fin)
+check('a session already idle at first sight gets no reminder',
+  (await collectSelfStatus(listing([idleRow('b')]), fin)).sessions[0].completedAgeMs === undefined)
+
+const first = await collectSelfStatus(listing([runningRow('a'), runningRow('b')]), fin)
+check('while both run, neither row carries a finish',
+  first.sessions.every(session => session.completedAgeMs === undefined), JSON.stringify(first.sessions))
+
+const oneDone = await collectSelfStatus(listing([runningRow('a'), idleRow('b')]), fin)
+check('only the session that stopped carries the finish',
+  oneDone.sessions.find(s => s.running === true)?.completedAgeMs === undefined
+  && Number.isFinite(oneDone.sessions.find(s => s.running === false)?.completedAgeMs),
+  JSON.stringify(oneDone.sessions))
+
+const stillDone = await collectSelfStatus(listing([runningRow('a'), idleRow('b')]), fin)
+check('the finish persists across reads and its age grows',
+  Number(stillDone.sessions.find(s => s.running === false)?.completedAgeMs)
+    >= Number(oneDone.sessions.find(s => s.running === false)?.completedAgeMs),
+  JSON.stringify(stillDone.sessions))
+
+const restarted = await collectSelfStatus(listing([runningRow('a'), runningRow('b')]), fin)
+check('a session that runs again drops its reminder',
+  restarted.sessions.every(session => session.completedAgeMs === undefined), JSON.stringify(restarted.sessions))
+
+const twice = await collectSelfStatus(listing([runningRow('a'), idleRow('b')]), fin)
+check('one session finishing twice is still one row',
+  twice.sessions.filter(session => session.completedAgeMs !== undefined).length === 1,
+  JSON.stringify(twice.sessions))
+
+const dropped = createPeerTracker()
+await collectSelfStatus(listing([runningRow('gone')]), dropped)
+await collectSelfStatus(listing([runningRow('kept')]), dropped)
+check('a session that left the list is forgotten',
+  dropped.completedAgeMs('gone', Date.now()) === undefined)
+await collectSelfStatus(listing([idleRow('kept')]), dropped)
+check('...so its stale baseline cannot invent a finish later',
+  Number.isFinite(dropped.completedAgeMs('kept', Date.now())))
+
+const blockedTracker = createPeerTracker()
+await collectSelfStatus(listing([runningRow('w')]), blockedTracker)
+const blockedRow = { sessionId: 'w', blank: false, running: true, updatedAt: Date.now() }
+const blockedRead = await collectSelfStatus(listing([blockedRow]), blockedTracker)
+check('a session still running carries no finish even while blocked',
+  blockedRead.sessions[0].completedAgeMs === undefined, JSON.stringify(blockedRead.sessions))
+
+check('a subagent is not observed, so its run cannot surface on the parent',
+  (await collectSelfStatus(
+    listing([{ sessionId: 'p', blank: false, running: false, updatedAt: Date.now() },
+      { sessionId: 'kid', origin: 'subagent', parentSessionId: 'p', blank: false, running: true, updatedAt: Date.now() }]),
+    createPeerTracker(),
+  )).sessions.length === 1)
+
 // Pin the join key itself: `id` is the wrong name, and a row that carries only
 // `id` must be treated as carrying no identity at all.
-const wrongKey = createPendingTracker()
+const wrongKey = createPeerTracker()
 wrongKey.track('legacy', 'approval')
 const misnamed = await collectSelfStatus(
   { get: name => (name === 'sessionController'

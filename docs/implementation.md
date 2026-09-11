@@ -63,7 +63,7 @@ README 里放不下的取舍、槽位选择、以及踩过的坑。
 | POST | `/hosts` | local | 新增或更新(`{ id?, name, url }`),url 规范化为 origin |
 | DELETE | `/hosts/<id>` | local | 删除 |
 | POST | `/probe` | local | 探测 `{ url }` → `{ reachable, status, dshAuthRequired, loopback, elapsedMs }` |
-| GET | `/self-status` | **peer** | 本机会话状态 `{ version: 4, available, sessions: [{ running, ageMs, pending? }] }`(唯一接受回环跨源来源的路由,见 [peer-status-badge.md](peer-status-badge.md)) |
+| GET | `/self-status` | **peer** | 本机会话状态 `{ version: 5, available, sessions: [{ running, ageMs, pending?, completedAgeMs? }] }`(唯一接受回环跨源来源的路由,见 [peer-status-badge.md](peer-status-badge.md)) |
 
 注册表落在 `$DSH_HOME/remote-dsh.json`,权限 `0600`,写入走临时文件 + rename。
 

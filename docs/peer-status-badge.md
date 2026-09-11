@@ -49,22 +49,39 @@ function updatedAt(header, metadata) {
 
 于是"一个 7 分钟前被提示、刚跑完的会话"和"一个闲着没跑的会话"**在单次快照里长得一模一样**。按 `ageMs < 你上次查看距今` 判定,只要你是**在提示之后、跑完之前**打开过远程视图(很正常 —— 你就是去看它干活的),绿点就永远不会亮。
 
-**只有 running→idle 这个边沿能说出这件事,而边沿需要两次观测。** 所以这一层由浏览器半面自己维护:
+**只有 running→idle 这个边沿能说出这件事,而边沿需要两次观测。** 所以 peer 半面在自己的 register 里盯着它:
 
 ```js
-// 每个 host 记上一次看到的"活着"的会话数;降了就武装一条提醒
-var finished = previous - live;
-if (finished > 0) pendingCompletions.set(hostId, ...);
+// packages/interaction/... —— 不是;这是 lib/index.js 里的 createPeerTracker
+observeRunning(sessionId, live, now) {
+  const previous = prevRunning.get(sessionId)
+  prevRunning.set(sessionId, live)
+  if (live) { completedAt.delete(sessionId); return }   // 又跑起来了 → 撤销提醒
+  if (previous === true) completedAt.set(sessionId, now) // 衰落沿 → 记一笔
+}
+```
+
+然后每一行按同一个形状上报`completedAgeMs`(距今多久跑完的),客户端取**这一行上两个时长里较小的那个**:
+
+```js
+function activityAgeMs(session) {
+  var age = Number.isFinite(Number(session.ageMs)) ? Number(session.ageMs) : Infinity;
+  var finished = Number(session.completedAgeMs);
+  return Number.isFinite(finished) && finished < age ? finished : age;
+}
 ```
 
 几个刻意的选择:
 
-- **基线是"活着"(running,含卡在等你的),不是"在跑"。** 一个会话从"在跑"变成"等你回答"不该被当成跑完 —— 那种情况已经在闪琥珀了。
-- **打开视图时只推进基线、不武装提醒**,所以你在看的时候什么都不会记;离开之后才跑完的那一轮照样抓得到。
-- **读不到的 host 直接丢掉基线**(peers 重启、页面被挂起)。否则重启后所有会话一起变 idle,会假装全部跑完了。
-- 基线只活在内存里,页面刷新就重置 —— 重启后第一次读**不会**误报,代价是刷新那一瞬间恰好结束的一轮会漏掉。
+- **寄存器按真实 session id 记,而 id 从不出网。** 这是把计数做成"会话数"而不是"信号数"的关键:一个会话同时满足"提示过"和"跑完了"时,两个时长落在**同一行**上,取小值就合成一个。反过来,如果让读的那一侧自己数边沿,它就分不清"一个会话跑完两次"和"两个会话各跑完一次",也分不清"只是被提示过"和"确实跑过"。
+- **"活着"包含卡在等你的会话。** 一个会话从"在跑"变成"等你回答"不该被当成跑完 —— 那种情况已经在闪琥珀了。
+- **第一次观测只记位、不记完成。** 加载时就已经闲着的会话不会补一条提醒,和远端自己的侧边栏一致。
+- **会话再次运行会撤销提醒**,也和浏览器的 session manager 一致。
+- 寄存器在 peer 进程里,所以**刷新页面不会丢**;而 peer 重启后它自然为空,不会假装所有会话刚跑完。
 
-`ageMs` 那条规则仍然保留,作为**次要信号**:它管的是"有人在别处提示了这台远端" —— 那种情况你浏览器可能根本没开着,任何边沿都观测不到。两个信号可能描述同一件事(在远端自己的 GUI 里提示、然后跑完),所以一个 host 报出的"有活动"数**永远不超过它的会话总数**。
+`ageMs` 那条规则还在,管的是另一种事:"有人在别处提示了这台远端" —— 那种情况你浏览器可能根本没开着,任何边沿都观测不到。它和 `completedAgeMs` 各自都是 peer 测出的**时长**,所以判定依旧不依赖两台机器的时钟一致。
+
+> **这里踩过一个坑:绿点后面的数字出现过 2,而实际上只有一个会话跑完。** 原因是当时读的那一侧把两个信号**相加**了 —— "提示过"算一个、"跑完边沿"算一个,同一个会话就占了两个;而那个用来兜底的"不超过会话总数"上限,在一个有两台会话的 peer 上恰好是 2,完全挡不住。现在两个信号落在同一行上取小值,结构上就不可能再加起来。
 
 配色和形状取自远端侧边栏自己用的同一批 theme token 和同一套画法,所以和它的会话列表完全一致:
 
@@ -172,7 +189,7 @@ peer 的 `self-status` 路由接受**回环来源**的跨源读取,并回 `acces
 - 只在 `/api/remote-dsh/self-status` 这一条**只读**路由上放宽;其它路由的 Origin 仍必须等于 Host。
 - 只接受 **loopback hostname** 的来源(本地 GUI 在 `127.0.0.1:3080`,peer 在 `127.0.0.1:3081` —— 同 site 但跨源,Origin 不可能等于 Host,这正是需要放宽的原因)。
 - 非回环来源、以及带 `Sec-Fetch-Site: cross-site` 的请求**依旧 403**。
-- 返回的载荷**只有计数**:`{ version, available, sessions: [{ running, ageMs, pending? }] }` —— 没有会话 id、标题或内容,`pending` 也只是 `approval` / `question` / `plan-review` 三个词之一。
+- 返回的载荷**只有计数**:`{ version, available, sessions: [{ running, ageMs, pending?, completedAgeMs? }] }` —— 没有会话 id、标题或内容,`pending` 也只是 `approval` / `question` / `plan-review` 三个词之一。
 - DSH 自己的 `/api` **不受影响**,依旧不发 CORS 头。
 
 **替代方案**是让本地 Host 半面做代理(不动围栏),但那要求本地 Host 模块重新加载 —— 也就是重启 DSH。实测确认 Host 半面的改动**不会**热加载,为了不打断会话,选了前者。

@@ -252,16 +252,82 @@ check('the still dot is layered the way the sidebar draws it',
 // clock runs ~3 s ahead, which an absolute-timestamp comparison would turn into
 // "activity arrived after you looked" for updates that landed just before.
 check('activity newer than the last look counts as unread',
-  exported.isUnreadPrompt({ running: false, ageMs: 1000 }, 5000) === true)
+  exported.isUnreadSession({ running: false, ageMs: 1000 }, 5000) === true)
 check('activity older than the last look counts as seen',
-  exported.isUnreadPrompt({ running: false, ageMs: 9000 }, 5000) === false)
+  exported.isUnreadSession({ running: false, ageMs: 9000 }, 5000) === false)
 check('viewing right now (elapsed 0) makes everything seen',
-  exported.isUnreadPrompt({ running: false, ageMs: 0 }, 0) === false)
+  exported.isUnreadSession({ running: false, ageMs: 0 }, 0) === false)
 check('a running session is never counted as unread',
-  exported.isUnreadPrompt({ running: true, ageMs: 1 }, 5000) === false)
+  exported.isUnreadSession({ running: true, ageMs: 1 }, 5000) === false)
 check('the peer payload carries a duration, not a timestamp',
-  exported.isUnreadPrompt({ running: false, ageMs: 1 }, 5000) === true
-  && exported.isUnreadPrompt({ running: false, updatedAt: 1 }, 5000) === false)
+  exported.isUnreadSession({ running: false, ageMs: 1 }, 5000) === true
+  && exported.isUnreadSession({ running: false, updatedAt: 1 }, 5000) === false)
+
+// ── 4d. One session, one unread ─────────────────────────────────────────────
+// Reported: a remote session finished and the green dot showed **2**. The reader
+// used to add its own completion count to the per-session prompt count, so a
+// session that was prompted and then finished scored twice — and the clamp that
+// was supposed to absorb that only bounded the total by the peer's session
+// count, which on a two-session peer is exactly the wrong number.
+//
+// The fix is structural: `completedAgeMs` rides the SAME row as `ageMs`, and a
+// row is unread or not. Two signals on one session cannot add up to two.
+console.log('')
+console.log('4d. one session, one unread')
+
+check('a finish reported on the row makes it unread',
+  exported.isUnreadSession({ running: false, ageMs: 600000, completedAgeMs: 1000 }, 30000) === true)
+check('...even though the prompt age alone predates the last look',
+  exported.isUnreadSession({ running: false, ageMs: 600000 }, 30000) === false)
+check('a prompt and a finish on ONE session is still one session',
+  exported.isUnreadSession({ running: false, ageMs: 500, completedAgeMs: 1000 }, 30000) === true
+  && exported.activityAgeMs({ running: false, ageMs: 500, completedAgeMs: 1000 }) === 500)
+check('the smaller of the two durations is the one reported',
+  exported.activityAgeMs({ ageMs: 9000, completedAgeMs: 100 }) === 100
+  && exported.activityAgeMs({ ageMs: 100, completedAgeMs: 9000 }) === 100)
+check('a row with only the older durations is not unread',
+  exported.isUnreadSession({ running: false, ageMs: 900000, completedAgeMs: 800000 }, 30000) === false)
+check('a row with no durations at all is not unread',
+  exported.isUnreadSession({ running: false }, 30000) === false
+  && exported.activityAgeMs({ running: false }) === Infinity)
+check('a peer older than v5 still reports prompt activity',
+  exported.isUnreadSession({ running: false, ageMs: 1000 }, 30000) === true)
+
+// End to end through readPeer: a v5 peer with one finished session must report
+// ONE unread session, not two, no matter how the prompt and finish line up.
+let peerBody = { version: 5, available: true, sessions: [] }
+globalThis.fetch = async () => ({ ok: true, json: async () => peerBody })
+const peerRow = { id: 'h9', name: 'mengshan', url: 'http://127.0.0.1:3099' }
+
+peerBody = {
+  version: 5, available: true,
+  sessions: [{ running: false, ageMs: 400000, completedAgeMs: 2000 }, { running: false, ageMs: 900000 }],
+}
+const reported = await exported.readPeer(peerRow, 30000)
+check('a host with one finished session reports one unread session',
+  reported.unread === 1, JSON.stringify(reported))
+
+peerBody = {
+  version: 5, available: true,
+  sessions: [{ running: false, ageMs: 400000, completedAgeMs: 2000 }, { running: true, ageMs: 100, completedAgeMs: 5 }],
+}
+const whileRunning = await exported.readPeer(peerRow, 30000)
+check('a running session is counted as running even after a previous finish',
+  whileRunning.running === 1 && whileRunning.unread === 1, JSON.stringify(whileRunning))
+
+peerBody = {
+  version: 5, available: true,
+  sessions: [{ running: false, ageMs: 1000 }, { running: false, ageMs: 2000 }],
+}
+const twoIdle = await exported.readPeer(peerRow, 5000)
+check('a session prompted while you were away is unread on its own',
+  twoIdle.unread === 2 && twoIdle.running === 0, JSON.stringify(twoIdle))
+
+// A v4 peer has no completion field; it must not be mistaken for one.
+peerBody = { version: 4, available: true, sessions: [{ running: false, ageMs: 400000 }] }
+const legacy = await exported.readPeer(peerRow, 30000)
+check('a v4 peer reports no completion it cannot know about',
+  legacy.unread === 0 && legacy.peer === true, JSON.stringify(legacy))
 
 // ── 4c. The amber "waiting for you" state ───────────────────────────────────
 // A peer session blocked on an approval, a question, or a plan review is the
@@ -316,107 +382,6 @@ check('the tooltip names the waiting state and its per-host breakdown',
   waitingTip.includes('等待你回答 1') && waitingTip.includes('mengshan：1 等待 / 0 运行 / 0 有活动'), waitingTip)
 check('an idle remote still reports no new activity',
   exported.statusTooltip({ waiting: 0, running: 0, unread: 0, unreachable: 0 }, []) === '远程 · 无新活动')
-
-// ── 4d. Completion reminders ────────────────────────────────────────────────
-// The reported regression: a remote session finished and the green dot never
-// appeared. `ageMs` counts from the last HUMAN PROMPT, so a session prompted
-// seven minutes ago and finished one second ago looks exactly like one that
-// never ran — no single snapshot can carry the difference. Only the
-// running→idle edge says it, so the edge is tracked between polls.
-console.log('')
-console.log('4d. completion reminders')
-
-let peerBody = { version: 4, available: true, sessions: [] }
-let peerOk = true
-globalThis.fetch = async () => ({ ok: peerOk, json: async () => peerBody })
-const peerRow = { id: 'h9', name: 'mengshan', url: 'http://127.0.0.1:3099' }
-const resetPeer = () => {
-  exported.liveBaseline.clear()
-  exported.pendingCompletions.clear()
-}
-
-resetPeer()
-peerBody = { version: 4, available: true, sessions: [{ running: true, ageMs: 400000 }] }
-const whileRunning = await exported.readPeer(peerRow, 30000, Date.now(), false)
-check('a running session is counted as running, not as activity',
-  whileRunning.running === 1 && whileRunning.unread === 0, JSON.stringify(whileRunning))
-check('...and it establishes the baseline for the next read',
-  exported.liveBaseline.get('h9') === 1, String(exported.liveBaseline.get('h9')))
-
-peerBody = { version: 4, available: true, sessions: [{ running: false, ageMs: 420000 }] }
-const afterFinish = await exported.readPeer(peerRow, 30000, Date.now(), false)
-check('a finish is reported even though the prompt age predates the last look',
-  afterFinish.running === 0 && afterFinish.unread === 1, JSON.stringify(afterFinish))
-check('...which the prompt age alone could never have said',
-  exported.isUnreadPrompt({ running: false, ageMs: 420000 }, 30000) === false)
-const again = await exported.readPeer(peerRow, 30000, Date.now(), false)
-check('the same finish is not counted twice on the next poll',
-  again.unread === 1, JSON.stringify(again))
-
-resetPeer()
-exported.liveBaseline.set('h9', 2)
-peerBody = {
-  version: 4, available: true,
-  sessions: [{ running: false, ageMs: 999999 }, { running: false, ageMs: 999999 }],
-}
-const twoFinished = await exported.readPeer(peerRow, 5000, Date.now(), false)
-check('two sessions finishing at once arm two reminders',
-  twoFinished.unread === 2, JSON.stringify(twoFinished))
-
-resetPeer()
-exported.liveBaseline.set('h9', 1)
-peerBody = { version: 4, available: true, sessions: [{ running: false, ageMs: 1 }] }
-const clamped = await exported.readPeer(peerRow, 30000, Date.now(), false)
-check('prompt-age and completion signals for one session collapse to one',
-  clamped.unread === 1, JSON.stringify(clamped))
-
-resetPeer()
-exported.liveBaseline.set('h9', 1)
-peerBody = { version: 4, available: true, sessions: [{ running: false, ageMs: 0 }] }
-const whileViewing = await exported.readPeer(peerRow, 0, Date.now(), true)
-check('nothing is armed while the view is open', whileViewing.unread === 0, JSON.stringify(whileViewing))
-check('...but the baseline still advances, so a later finish is caught',
-  exported.liveBaseline.get('h9') === 0, String(exported.liveBaseline.get('h9')))
-
-resetPeer()
-exported.liveBaseline.set('h9', 1)
-peerBody = { version: 4, available: true, sessions: [{ running: true, ageMs: 10, pending: 'approval' }] }
-const blocked = await exported.readPeer(peerRow, 30000, Date.now(), false)
-check('a session blocked on the operator stays live, so it is not a completion',
-  blocked.waiting === 1 && blocked.unread === 0, JSON.stringify(blocked))
-check('...and it leaves the baseline where it was',
-  exported.liveBaseline.get('h9') === 1, String(exported.liveBaseline.get('h9')))
-
-resetPeer()
-exported.liveBaseline.set('h9', 4)
-peerOk = false
-const unreachable = await exported.readPeer(peerRow, 30000, Date.now(), false)
-check('an unreadable peer reports itself as not a peer',
-  unreachable.reachable === true && unreachable.peer === false, JSON.stringify(unreachable))
-check('...and forgets the baseline, so a restart cannot fake a completion',
-  exported.liveBaseline.has('h9') === false)
-peerOk = true
-peerBody = { version: 4, available: true, sessions: [{ running: false, ageMs: 999999 }] }
-const reconnected = await exported.readPeer(peerRow, 30000, Date.now(), false)
-check('a host with no baseline never arms on its first read back',
-  reconnected.unread === 0, JSON.stringify(reconnected))
-
-resetPeer()
-peerBody = { version: 4, available: true, sessions: [] }
-
-// The green dot's clearing rule is unchanged: opening the view drops the
-// reminders for that host on the spot.
-exported.pendingCompletions.set('h9', 2)
-exported.statusStore.set({
-  totals: { waiting: 0, running: 0, unread: 2, unreachable: 0 },
-  hosts: [{ id: 'h9', name: 'mengshan', reachable: true, peer: true, waiting: 0, running: 0, unread: 2 }],
-  failed: false,
-})
-exported.statusStore.setViewing('h9')
-check('opening a host view also clears its completion reminders',
-  exported.pendingCompletions.has('h9') === false)
-exported.statusStore.setViewing(null)
-exported.statusStore.set({ totals: { waiting: 0, running: 0, unread: 0, unreachable: 0 }, hosts: [], failed: false })
 
 // Driving the real store proves the glyph is wired to it, not just that the
 // badge function renders.
