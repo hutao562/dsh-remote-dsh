@@ -214,6 +214,29 @@ check('a blocked subagent is attributed to the row the reader sees',
   rolled.sessions.find(session => session.running === true)?.pending === 'question',
   JSON.stringify(rolled.sessions))
 
+// The regression this pins: the register used to be pruned to the ids of the
+// rows a read REPORTS, and a subagent is not a row. So the very read that
+// reported a blocked subagent deleted its request, and the amber dot lived for
+// exactly one poll. Retention is now split — liveness follows the reported rows,
+// requests follow every listed session.
+const repeating = createPeerTracker()
+repeating.track('child', 'question')
+const acrossPolls = []
+for (let i = 0; i < 3; i += 1) {
+  acrossPolls.push((await collectSelfStatus(statusCtx, repeating))
+    .sessions.find(session => session.running === true)?.pending)
+}
+check('a blocked subagent keeps reporting across polls, not just the first',
+  acrossPolls.every(kind => kind === 'question'), JSON.stringify(acrossPolls))
+
+const vanished = createPeerTracker()
+vanished.track('child', 'question')
+await collectSelfStatus({ get: name => (name === 'sessionController'
+  ? { list: async () => ({ items: [{ sessionId: 'root', blank: false, running: true, updatedAt: now }] }) }
+  : undefined) }, vanished)
+check('...but a request from a session that left the list is forgotten',
+  vanished.kindOf('child') === undefined, JSON.stringify(vanished.entries()))
+
 const orphan = createPeerTracker()
 orphan.track('never-listed', 'approval')
 const unlisted = await collectSelfStatus(statusCtx, orphan)

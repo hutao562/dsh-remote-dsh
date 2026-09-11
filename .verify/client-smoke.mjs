@@ -323,6 +323,14 @@ const twoIdle = await exported.readPeer(peerRow, 5000)
 check('a session prompted while you were away is unread on its own',
   twoIdle.unread === 2 && twoIdle.running === 0, JSON.stringify(twoIdle))
 
+// A peer that answers but cannot read its own sessions must not be presented as
+// an idle one — that would be one more signal quietly lost.
+peerBody = { version: 5, available: false, reason: 'no-session-controller' }
+const mute = await exported.readPeer(peerRow, 30000)
+check('a peer that cannot read its own state is reported as unreadable, not idle',
+  mute.reachable === true && mute.peer === false && mute.unread === undefined,
+  JSON.stringify(mute))
+
 // A v4 peer has no completion field; it must not be mistaken for one.
 peerBody = { version: 4, available: true, sessions: [{ running: false, ageMs: 400000 }] }
 const legacy = await exported.readPeer(peerRow, 30000)
