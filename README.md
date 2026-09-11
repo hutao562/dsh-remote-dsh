@@ -1,6 +1,12 @@
 # dsh-remote-dsh
 
-A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin. It adds a **「远程」** row at the top of the sidebar; clicking it turns the **whole page** into another host's DSH Web GUI. The row also carries a session-state dot for that remote — **blue** while it is running something, **green** when activity arrived since you last looked.
+[English](README.en.md) | 中文
+
+[![npm](https://img.shields.io/npm/v/dsh-remote-dsh?color=blue)](https://www.npmjs.com/package/dsh-remote-dsh)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![topic](https://img.shields.io/badge/topic-dsh--plugin-blueviolet)](https://github.com/topics/dsh-plugin)
+
+A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin. It adds a **「远程」** row at the top of the sidebar; clicking it turns the **whole page** into another host's DSH Web GUI. The row also carries a session-state dot for that remote — **blue** while it is running something, **green** when activity arrived since you last looked.
 
 ```
 ┌────────────┬──────────────────────────────────┐
@@ -13,11 +19,11 @@ A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin. It adds a **�
 
 实际长这样。侧边栏顶部那一行 —— 蓝色胶囊就是远端的状态点(这里远端正跑着东西,数字是会话数):
 
-![本机侧边栏的「远程」行](docs/images/sidebar-row.png)
+![本机侧边栏的「远程」行](https://raw.githubusercontent.com/hutao562/dsh-remote-dsh/main/docs/images/sidebar-row.png)
 
 点开之后,整个页面都变成远端那台机器的 DSH:顶栏是插件的(返回 / 主机 / 添加 / 设置 / 连通状态),下面是它的 GUI,连侧边栏都是它的:
 
-![整页切到远端的 DSH](docs/images/remote-takeover.png)
+![整页切到远端的 DSH](https://raw.githubusercontent.com/hutao562/dsh-remote-dsh/main/docs/images/remote-takeover.png)
 
 ## 装
 

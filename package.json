@@ -34,7 +34,8 @@
     "lib",
     "docs",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "README.en.md"
   ],
   "scripts": {
     "test": "node .verify/host-pending.mjs && node .verify/client-smoke.mjs",
