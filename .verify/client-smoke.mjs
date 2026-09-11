@@ -232,17 +232,64 @@ check('the peer payload carries a duration, not a timestamp',
   exported.isUnreadActivity({ running: false, ageMs: 1 }, 5000) === true
   && exported.isUnreadActivity({ running: false, updatedAt: 1 }, 5000) === false)
 
+// ── 4c. The amber "waiting for you" state ───────────────────────────────────
+// A peer session blocked on an approval, a question, or a plan review is the
+// one state the operator must not miss, so it outranks every other color.
+console.log('')
+console.log('4c. waiting-for-you state')
+
+check('every pending kind the remote can report is recognised',
+  ["approval", "question", "plan-review"].every(kind => exported.isWaitingOnUser({ pending: kind })))
+check('a session with no pending field is not waiting (v3 peers never send one)',
+  exported.isWaitingOnUser({ running: true, ageMs: 5 }) === false)
+check('an unknown pending kind is ignored rather than trusted',
+  exported.isWaitingOnUser({ pending: "something-else" }) === false)
+check('a malformed session row is not waiting',
+  exported.isWaitingOnUser(null) === false && exported.isWaitingOnUser("approval") === false)
+
+const waitingWide = render(exported.statusBadge({ waiting: 1, running: 2, unread: 3, unreachable: 0 }, false))
+check('wide badge shows a count for the waiting state', waitingWide.includes('>1<'), waitingWide)
+check('wide badge uses the amber token for the waiting dot',
+  waitingWide.includes('--dsw-alias-state-warn-primary'), waitingWide)
+check('the waiting count is labelled as a request to the operator',
+  waitingWide.includes('等待你回答'), waitingWide)
+check('waiting is rendered before running in the wide badge',
+  waitingWide.indexOf('等待你回答') < waitingWide.indexOf('运行中'), waitingWide)
+
+const waitingCompact = render(exported.statusBadge({ waiting: 1, running: 2, unread: 3, unreachable: 0 }, true))
+check('rail badge takes the amber color when a session is waiting for you',
+  waitingCompact.includes('--dsw-alias-state-warn-primary'), waitingCompact)
+const amberOverRed = render(exported.statusBadge({ waiting: 1, running: 0, unread: 0, unreachable: 4 }, true))
+check('rail badge prefers amber over the unreachable color',
+  amberOverRed.includes('--dsw-alias-state-warn-primary') && !amberOverRed.includes('--dsw-alias-state-error-primary'),
+  amberOverRed)
+check('a waiting count of zero renders no badge at all',
+  exported.statusBadge({ waiting: 0, running: 0, unread: 0, unreachable: 0 }, false) === null)
+
+const waitingTip = exported.statusTooltip(
+  { waiting: 1, running: 0, unread: 0, unreachable: 0 },
+  [{ id: 'h1', name: 'mengshan', reachable: true, peer: true, waiting: 1, running: 0, unread: 0 }],
+)
+check('the tooltip names the waiting state and its per-host breakdown',
+  waitingTip.includes('等待你回答 1') && waitingTip.includes('mengshan：1 等待 / 0 运行 / 0 有活动'), waitingTip)
+check('an idle remote still reports no new activity',
+  exported.statusTooltip({ waiting: 0, running: 0, unread: 0, unreachable: 0 }, []) === '远程 · 无新活动')
+
 // Driving the real store proves the glyph is wired to it, not just that the
 // badge function renders.
 exported.statusStore.set({
-  totals: { running: 1, unread: 2, unreachable: 0 },
-  hosts: [{ id: 'h1', name: 'mengshan', reachable: true, peer: true, running: 1, unread: 2 }],
+  totals: { waiting: 1, running: 1, unread: 2, unreachable: 0 },
+  hosts: [{
+    id: 'h1', name: 'mengshan', reachable: true, peer: true, waiting: 1, running: 1, unread: 2,
+  }],
   failed: false,
 })
 const badgeHtml = render(React.createElement(rail.component, { size: 16, active: true }))
 check('the rail glyph subscribes to the store', badgeHtml.includes('data-dsh-remote-badge'), badgeHtml.slice(0, 100))
 check('the glyph tooltip breaks the aggregate down per host',
   badgeHtml.includes('mengshan') && badgeHtml.includes('运行中 1'), badgeHtml)
+check('the glyph carries the waiting state into the rail',
+  badgeHtml.includes('等待你回答') && badgeHtml.includes('--dsw-alias-state-warn-primary'), badgeHtml)
 
 // The regression the user hit: an "idle session" badge could never clear.
 // Opening a host's view must drop its unread count on the spot, and leave the
@@ -253,11 +300,15 @@ check('opening a host view clears its unread count immediately',
   !seenHtml.includes('上次查看后有活动'), seenHtml)
 check('...without disturbing the running count',
   seenHtml.includes('运行中') && seenHtml.includes('>1<'), seenHtml)
+// Waiting is a live condition, not a notification: looking at the remote does
+// not answer the question, so the amber dot must survive the visit.
+check('...and without pretending a waiting session was answered',
+  seenHtml.includes('等待你回答'), seenHtml)
 check('a host that was just viewed is recorded as seen',
   Number(globalThis.window.localStorage.getItem('dsh-remote-dsh:last-seen:h1')) > 0)
 
 exported.statusStore.setViewing(null)
-exported.statusStore.set({ totals: { running: 0, unread: 0, unreachable: 0 }, hosts: [], failed: false })
+exported.statusStore.set({ totals: { waiting: 0, running: 0, unread: 0, unreachable: 0 }, hosts: [], failed: false })
 const clearedHtml = render(React.createElement(rail.component, { size: 16, active: true }))
 check('clearing the store removes the badge again', !clearedHtml.includes('data-dsh-remote-badge'))
 

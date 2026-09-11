@@ -49,9 +49,12 @@ dsh plugin --profile web add dsh-remote-dsh
 
 | 颜色 | 含义 | 何时消失 |
 |---|---|---|
+| **琥珀** | 远端有会话**卡在等你回答**(批准 / 提问 / 计划评审) | 在那边答完 |
 | **蓝** | 远端正跑着东西(含子代理) | 跑完 |
 | **绿** | 自你上次打开远程视图之后有过活动 | **打开远程即清零** |
 | **红** | 读不到(该远端没装 peer) | 恢复后 |
+
+琥珀是唯一一个"看一眼不会消失"的状态 —— 它是阻塞,不是通知。点进远程视图就能看到那边弹出的批准框或提问,答完即灭。
 
 要让状态点工作,**被控端也要装本插件并以 `peer` 角色运行**。它只发布匿名计数(没有会话 id、标题或内容),而且**不需要任何凭据** —— 这是它相比"本地保存 token"的关键优势。
 
@@ -71,7 +74,8 @@ dsh plugin --profile web add dsh-remote-dsh
 | `lib/client.js` | 浏览器半面:手写 `__ModuleLoader__` bundle,注册三个官方 slot |
 | `cordis.patch.yml` | bundle 层插入行(走 `dsh plugin add` 时生效) |
 | `docs/` | 上面链接的深度说明 |
-| `.verify/client-smoke.mjs` | 冒烟测试 |
+| `.verify/host-pending.mjs` | Node 半面自检:`pending` 的记账与归因 |
+| `.verify/client-smoke.mjs` | 浏览器半面冒烟测试 |
 
 **没有构建步骤** —— `lib/` 就是源码,改完即生效。
 
@@ -79,14 +83,16 @@ dsh plugin --profile web add dsh-remote-dsh
 
 ```bash
 npm install
-npm test     # 67 项断言:module loader 契约 + 真 React 渲染 + jsdom 真实点击
+npm test          # 112 项断言
+npm run test:host   # 只跑 Node 半面:waterfall 记账、resolve / reject / 同步抛出、子代理归因
+npm run test:client # 只跑浏览器半面:module loader 契约 + 真 React 渲染 + jsdom 真实点击
 ```
 
 想在源码目录里改并让本机 DSH 立刻加载(首次插入即热加载,不需要重启)→ [docs/implementation.md](docs/implementation.md)
 
 ## 已知限制
 
-- **琥珀色(等你处理)没做。** `pendingInteraction` 在 DSH 里是纯客户端概念,Host 侧没有任何服务暴露它。
+- **琥珀色只在被控端装了 v4 以上的 peer 时才出现。** 旧版 peer 不上报 `pending`,不会因此变红,但也不会有琥珀。
 - **接管时会盖住本地侧边栏**,返回靠顶栏按钮;焦点进了 iframe 之后 Esc 会失效。
 - **改 `lib/index.js` 需要重启 DSH**;`lib/client.js` 的改动刷新页面即可。
 - 只做"用起来",没做 agent 集成 —— 没有把远程主机暴露成模型工具。

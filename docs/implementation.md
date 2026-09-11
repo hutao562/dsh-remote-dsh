@@ -63,7 +63,7 @@ README 里放不下的取舍、槽位选择、以及踩过的坑。
 | POST | `/hosts` | local | 新增或更新(`{ id?, name, url }`),url 规范化为 origin |
 | DELETE | `/hosts/<id>` | local | 删除 |
 | POST | `/probe` | local | 探测 `{ url }` → `{ reachable, status, dshAuthRequired, loopback, elapsedMs }` |
-| GET | `/self-status` | **peer** | 本机会话状态(唯一接受回环跨源来源的路由,见 [peer-status-badge.md](peer-status-badge.md)) |
+| GET | `/self-status` | **peer** | 本机会话状态 `{ version: 4, available, sessions: [{ running, ageMs, pending? }] }`(唯一接受回环跨源来源的路由,见 [peer-status-badge.md](peer-status-badge.md)) |
 
 注册表落在 `$DSH_HOME/remote-dsh.json`,权限 `0600`,写入走临时文件 + rename。
 
@@ -98,7 +98,8 @@ EOF
 
 ## 已知限制
 
-- **琥珀色(等你处理)没做** —— `pendingInteraction` 是纯客户端概念,原因见 [peer-status-badge.md](peer-status-badge.md)。
+- **每个远端必须装了本插件的 peer 角色才有状态点**,否则归入「状态不可读」;琥珀色还要求对方是 v4 以上的 peer。
+- **被控端的 pending 只在 Host 侧观察到的请求上成立。** 如果某个第三方插件把待处理状态放在纯浏览器侧、不经过 `approval/request` / `user-questions/request` 这两个 waterfall,peer 就看不到它。
 - **接管时盖住本地侧边栏**,返回靠顶栏按钮;焦点进了 iframe 之后 **Esc 会失效**(键盘事件被远程文档吃掉)。想保留侧边栏可见、只让右侧整块变远程,改一行 inset 即可。
 - **配对标记只是个本地记号。** `localStorage` 里记的是"提交过 token",不是"cookie 还有效"。30 天到期或你在远程侧清了 cookie,设置行不会自动重新展开 —— 点一下「⚙」即可。
 - **每个远端必须装了本插件的 peer 角色才有状态点**,否则归入「状态不可读」。

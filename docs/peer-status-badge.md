@@ -6,11 +6,14 @@ rail 上那个彩色点是怎么来的、为什么这么设计,以及它唯一�
 
 | 颜色 | 含义 | 何时出现 | 何时消失 |
 |---|---|---|---|
-| **蓝** | 远端有会话正在跑(含子代理) | 开始运行 | 跑完 |
+| **琥珀** | 远端有会话正卡在**等你回答**(批准 / 提问 / 计划评审) | 请求发出 | 那边被回答 |
+| **蓝** | 远端有会话正在跑 | 开始运行 | 跑完 |
 | **绿** | 自你上次打开远程视图之后,有会话被改动过 | 有活动 | **打开远程视图即清零** |
 | **红** | 该远端的状态读不到 | 读不到 | 恢复后 |
 
-展开时显示「点 + 计数」(例如 `●1 ●2`);收起成 36px rail 时只留一个点(按 蓝 > 绿 > 红 取最高优先级),完整分解在 tooltip 里,含每台主机的明细。
+展开时显示「点 + 计数」(例如 `●1 ●2 ●3`);收起成 36px rail 时只留一个点(按 琥珀 > 蓝 > 绿 > 红 取最高优先级),完整分解在 tooltip 里,含每台主机的明细。
+
+**琥珀不会因为"你看过了"而消失** —— 它是活的阻塞状态,不是通知。得在远端那边真的把问题答了它才灭。这个优先级和远端自己侧边栏的行一致:一个正等你的会话不是"忙",是"停住了"。
 
 ### 绿点为什么不是"空闲会话数"
 
@@ -26,11 +29,36 @@ return [{ state: 'done', label: '空闲' }]
 
 配色取自远端侧边栏自己用的同一批 theme token,所以和它的会话列表完全一致。
 
-### 琥珀色(等你处理)为什么没做
+### 琥珀色(等你处理)是怎么拿到的
 
-`pendingInteraction` 在 DSH 里是**纯客户端概念**:它由 approval / user-questions 这些客户端包注册的 pending domain 汇总(见 `uiSession.pendingInteractions`),**Host 侧没有任何服务暴露它**。peer 只跑在 Host 侧,所以拿不到。
+`pendingInteraction` 在浏览器那边确实是**拼出来的**:它由 approval / user-questions 这些客户端包注册的 pending domain 汇总(见 `uiSession.pendingInteractions`),**Host 侧没有任何服务把它当数据暴露出来**。
 
-要做的话,得让被控端的**浏览器半面**也参与上报,是另一套设计。
+但 Host 侧有**请求本身**。这两个包都是发一个 scope-filtered 的 waterfall,只有等某个 answerer 返回才结算:
+
+```js
+// packages/interaction/user-approval/src/index.ts
+this.ctx.waterfall(scopeTarget(req.agent, req.agent), 'approval/request', req, () => 'unavailable')
+
+// packages/interaction/user-questions/src/types.ts —— 同一个形状
+'user-questions/request'(request, next): Promise<AskUserQuestionAnswer>
+```
+
+所以 peer 半面在根 context 上挂两个监听(**和 Remote-event 桥接用的是同一个挂法**),把 waterfall 攥在手里直到它结算:
+
+```js
+ctx.on('approval/request', (request, next) => hold(tracker, sessionIdOf(request), 'approval', next))
+ctx.on('user-questions/request', (request, next) => hold(tracker, sessionIdOf(request), kindOf(request), next))
+```
+
+`hold` 是**透明的链节**:记录 → `next()` → 结算时释放。它不回答、不吞异常、不改结果(下游同步抛出的异常照样同步抛出),唯一的副作用是这段时间里这个会话被标成"等你"。请求该到哪个浏览器还是到哪个浏览器。
+
+三个细节:
+
+- **一次会话可能同时挂着多个请求**(嵌套提问),所以每个请求按 token 记,一个会话对外只报**优先级最高的那个** —— 和客户端 pending domain 的排序一致:计划评审 > 提问 > 批准。
+- **子代理的请求归到它的顶层祖先**。sidebar 不把子代理当独立行显示,所以一个卡住的子代理如果不往上归,读者就什么也看不到 —— 而它确实把父会话的任务堵住了。
+- 只在 `role: 'peer'` 时挂。本地那一侧不需要,也就不进它的 listener 链。
+
+契约版本随之从 3 升到 4(多一个**可选**的 `pending` 字段)。**读的一侧同时接受 3 和 4**:一台还没升级的 peer 只是永远不上报 `pending`,不会因此变成红的。
 
 ## 数据怎么过来的:peer 角色
 
@@ -96,7 +124,7 @@ peer 的 `self-status` 路由接受**回环来源**的跨源读取,并回 `acces
 - 只在 `/api/remote-dsh/self-status` 这一条**只读**路由上放宽;其它路由的 Origin 仍必须等于 Host。
 - 只接受 **loopback hostname** 的来源(本地 GUI 在 `127.0.0.1:3080`,peer 在 `127.0.0.1:3081` —— 同 site 但跨源,Origin 不可能等于 Host,这正是需要放宽的原因)。
 - 非回环来源、以及带 `Sec-Fetch-Site: cross-site` 的请求**依旧 403**。
-- 返回的载荷**只有计数**:`{ version, available, sessions: [{ running, ageMs }] }` —— 没有会话 id、标题或内容。
+- 返回的载荷**只有计数**:`{ version, available, sessions: [{ running, ageMs, pending? }] }` —— 没有会话 id、标题或内容,`pending` 也只是 `approval` / `question` / `plan-review` 三个词之一。
 - DSH 自己的 `/api` **不受影响**,依旧不发 CORS 头。
 
 **替代方案**是让本地 Host 半面做代理(不动围栏),但那要求本地 Host 模块重新加载 —— 也就是重启 DSH。实测确认 Host 半面的改动**不会**热加载,为了不打断会话,选了前者。
