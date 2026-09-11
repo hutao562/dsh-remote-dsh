@@ -170,6 +170,12 @@ check('style tag is tagged for DOM inspection',
 // of the label. `:has` on our own marker is what keeps other panels untouched.
 check('the seam dissolves the shell glyph span for this row only',
   sidebarCss.includes('[class*="panelGlyph"]:has([data-dsh-remote-badge]){display:contents}'), sidebarCss)
+// Insurance for the rail dot: its wrapper is only a box because RemoteIcon
+// reads the shell's 16/18 size prop. Without a containing block on the row, a
+// dot that ever lost that wrapper would resolve against the viewport and paint
+// at the top-right of the page.
+check('the row is a containing block for the corner dot',
+  sidebarCss.includes('[class*="panelRow"]:has([data-dsh-remote-badge]){position:relative}'), sidebarCss)
 check('the effect is labelled', effects.some(entry => String(entry.label).includes('styles')))
 
 // The running dot animates through a keyframe, and React inline styles cannot
