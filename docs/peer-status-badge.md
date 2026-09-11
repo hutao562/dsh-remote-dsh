@@ -46,11 +46,15 @@ this.ctx.waterfall(scopeTarget(req.agent, req.agent), 'approval/request', req, (
 所以 peer 半面在根 context 上挂两个监听(**和 Remote-event 桥接用的是同一个挂法**),把 waterfall 攥在手里直到它结算:
 
 ```js
-ctx.on('approval/request', (request, next) => hold(tracker, sessionIdOf(request), 'approval', next))
-ctx.on('user-questions/request', (request, next) => hold(tracker, sessionIdOf(request), kindOf(request), next))
+ctx.on('approval/request', function (request, next) {
+  return holdPending(tracker, requestSessionId(request), 'approval', next)
+})
+ctx.on('user-questions/request', function (request, next) {
+  return holdPending(tracker, requestSessionId(request), questionKind(request), next)
+})
 ```
 
-`hold` 是**透明的链节**:记录 → `next()` → 结算时释放。它不回答、不吞异常、不改结果(下游同步抛出的异常照样同步抛出),唯一的副作用是这段时间里这个会话被标成"等你"。请求该到哪个浏览器还是到哪个浏览器。
+`holdPending` 是**透明的链节**:记录 → `next()` → 结算时释放。它不回答、不吞异常、不改结果(下游同步抛出的异常照样同步抛出),唯一的副作用是这段时间里这个会话被标成"等你"。请求该到哪个浏览器还是到哪个浏览器。
 
 三个细节:
 
