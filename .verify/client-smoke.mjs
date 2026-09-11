@@ -168,14 +168,39 @@ check('style tag is tagged for DOM inspection',
 // The count cluster only reaches the row's trailing edge if the shell's glyph
 // span stops being a box for our row: without this the chip is laid out in front
 // of the label. `:has` on our own marker is what keeps other panels untouched.
+// The marker is the GLYPH, not the badge: these rules must hold in every state,
+// and `data-dsh-remote-badge` only exists while there is something to report.
 check('the seam dissolves the shell glyph span for this row only',
-  sidebarCss.includes('[class*="panelGlyph"]:has([data-dsh-remote-badge]){display:contents}'), sidebarCss)
+  sidebarCss.includes('[class*="panelGlyph"]:has([data-dsh-remote-glyph]){display:contents}'), sidebarCss)
+// Dissolving the glyph makes the cluster a flex item of the row, but it is still
+// laid out BEFORE the shell's label, so its `margin-left: auto` eats the free
+// space and carries the LABEL off to the trailing edge (measured against the
+// real stylesheets: label at 188px in a 248px row instead of 32px, cluster 44px
+// from the trailing edge). `order` is what restores every other row's shape:
+// `[glyph][label] ······ [chips]`.
+check('the seam orders the count cluster after the shell label',
+  sidebarCss.includes('[data-dsh-remote-cluster]{order:1}'), sidebarCss)
 // Insurance for the rail dot: its wrapper is only a box because RemoteIcon
 // reads the shell's 16/18 size prop. Without a containing block on the row, a
 // dot that ever lost that wrapper would resolve against the viewport and paint
 // at the top-right of the page.
 check('the row is a containing block for the corner dot',
-  sidebarCss.includes('[class*="panelRow"]:has([data-dsh-remote-badge]){position:relative}'), sidebarCss)
+  sidebarCss.includes('[class*="panelRow"]:has([data-dsh-remote-glyph]){position:relative}'), sidebarCss)
+// The one rule here that types text this plugin does not own: the seat has no
+// label slot, so the shell renders the row's name as body copy. Family, size and
+// weight — named family (not inherited by luck), the sidebar's own row-label
+// size, and the weight the seat's siblings use (New Session 500, brand 600).
+const labelRule = sidebarCss.split('}').find(rule => rule.includes('panelTitle'))
+check('the seam types the shell label it does not own',
+  typeof labelRule === 'string'
+  && labelRule.includes('font-family:var(--dsw-font-family')
+  && labelRule.includes('font-size:14px')
+  && labelRule.includes('font-weight:500'), String(labelRule))
+check('...and types no other label, and nothing else on that label',
+  labelRule !== undefined && !/\bcolor\s*:|\bletter-spacing\s*:|\bline-height\s*:|\bfont-style\s*:/u.test(labelRule),
+  String(labelRule))
+check('the label rule is scoped to rows that carry our glyph',
+  sidebarCss.includes(':has([data-dsh-remote-glyph]) [class*="panelTitle"]'), sidebarCss)
 check('the effect is labelled', effects.some(entry => String(entry.label).includes('styles')))
 
 // The running dot animates through a keyframe, and React inline styles cannot
@@ -215,6 +240,11 @@ const iconHtml = ReactDOMServer.renderToStaticMarkup(
 check('rail icon renders an <svg>', iconHtml.startsWith('<svg'), iconHtml.slice(0, 60))
 check('rail icon renders no text label', !/>[^<]*远程/u.test(iconHtml), iconHtml)
 check('no session-state badge while nothing is known', !iconHtml.includes('data-dsh-remote-badge'), iconHtml.slice(0, 80))
+// ...but the row marker is on the glyph in EVERY state, which is what lets the
+// seam style the row's label whether or not there is anything to report. Without
+// the badge the glyph used to be the only thing this seat could key on.
+check('the glyph carries the row marker even with no badge',
+  iconHtml.includes('data-dsh-remote-glyph'), iconHtml.slice(0, 120))
 
 // ── 4b. Session-state badge ─────────────────────────────────────────────────
 console.log('')
@@ -570,6 +600,23 @@ globalThis.fetch = async (url, init) => {
 
 const tick = async (ms = 40) => { await new Promise(resolve => { dom.window.setTimeout(resolve, ms) }) }
 
+/**
+ * Wait for a condition instead of sleeping a fixed number of milliseconds: the
+ * mount below walks a fetch promise chain and several effects, and on a loaded
+ * machine 40ms was occasionally not enough, which made this check flaky.
+ * @param predicate - condition to poll.
+ * @param ms - how long to keep trying.
+ * @returns whether the condition held.
+ */
+const until = async (predicate, ms = 4000) => {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await tick(25)
+  }
+  return predicate()
+}
+
 const container = dom.window.document.getElementById('app')
 const root = ReactDOMClient.createRoot(container)
 root.render(React.createElement(exported.RemoteWorkspace, {
@@ -583,7 +630,8 @@ const tokenField = () => Array.from(container.querySelectorAll('input'))
 const gear = () => Array.from(container.querySelectorAll('button'))
   .find(button => button.textContent === '⚙')
 
-check('the host list loaded and the remote frame is mounted', container.querySelector('iframe') !== null)
+check('the host list loaded and the remote frame is mounted',
+  await until(() => container.querySelector('iframe') !== null))
 check('an UNPAIRED host does not force the settings row open', tokenField() === undefined)
 check('the ⚙ toggle is present', gear() !== undefined)
 
